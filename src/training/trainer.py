@@ -51,8 +51,14 @@ class Trainer:
             "episode_log.csv",
         )
 
-        # Create the CSV and header if it
-        # doesn't already exist.
+        self._create_csv_if_missing()
+
+    def _create_csv_if_missing(self):
+        """
+        Create the episode CSV with its header
+        if it does not already exist.
+        """
+
         if not os.path.exists(
             self.csv_path
         ):
@@ -74,6 +80,91 @@ class Trainer:
                     ]
                 )
 
+    def _prepare_csv(
+        self,
+        start_episode,
+    ):
+        """
+        Make the CSV match the checkpoint we are
+        resuming from.
+
+        If resuming from episode 50, only episodes
+        1-50 are kept. Any rows after episode 50
+        are discarded.
+
+        If starting from episode 1, the CSV is reset.
+        """
+
+        header = [
+            "episode",
+            "reward",
+            "average_reward",
+            "epsilon",
+            "steps",
+            "loss",
+        ]
+
+        # Fresh training run.
+        if start_episode == 1:
+            with open(
+                self.csv_path,
+                "w",
+                newline="",
+            ) as file:
+                writer = csv.writer(file)
+                writer.writerow(header)
+
+            return
+
+        # Nothing to truncate if the CSV does not exist.
+        if not os.path.exists(
+            self.csv_path
+        ):
+            with open(
+                self.csv_path,
+                "w",
+                newline="",
+            ) as file:
+                writer = csv.writer(file)
+                writer.writerow(header)
+
+            return
+
+        # Read the existing CSV.
+        with open(
+            self.csv_path,
+            "r",
+            newline="",
+        ) as file:
+            reader = csv.reader(file)
+
+            rows = list(reader)
+
+        # Keep the header plus episodes before
+        # the new training run.
+        kept_rows = [header]
+
+        for row in rows[1:]:
+            if not row:
+                continue
+
+            try:
+                episode = int(row[0])
+            except ValueError:
+                continue
+
+            if episode < start_episode:
+                kept_rows.append(row)
+
+        # Rewrite the CSV with only valid history.
+        with open(
+            self.csv_path,
+            "w",
+            newline="",
+        ) as file:
+            writer = csv.writer(file)
+            writer.writerows(kept_rows)
+
     def train_dqn(
         self,
         num_episodes,
@@ -89,6 +180,12 @@ class Trainer:
         The DQN algorithm owns the persistent
         total training step counter.
         """
+
+        # Make sure the CSV matches the checkpoint
+        # we are starting from.
+        self._prepare_csv(
+            start_episode
+        )
 
         epsilon = epsilon_start
 
