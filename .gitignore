@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Reinforcement learning experiments
+checkpoints/
+episode_log.csv
