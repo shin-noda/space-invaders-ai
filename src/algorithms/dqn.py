@@ -93,6 +93,7 @@ class DQN:
         state,
         action,
         reward,
+        next_state,
         done,
     ):
         self.replay_buffer.add(
