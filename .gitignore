@@ -220,3 +220,4 @@ __marimo__/
 # Reinforcement learning experiments
 checkpoints/
 episode_log.csv
+.DS_Store

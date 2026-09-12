@@ -53,6 +53,7 @@ def test_trainer():
         algorithm=dqn,
         device=device,
         checkpoint_dir="checkpoints/test",
+        replaybuffer_dir="replaybuffer/test",
         save_interval=10,
     )
 

@@ -16,6 +16,7 @@ class Trainer:
     - epsilon scheduling
     - target network updates
     - checkpoint saving
+    - replay buffer saving
     - episode CSV logging
 
     The actual learning logic belongs to the algorithm.
@@ -27,6 +28,7 @@ class Trainer:
         algorithm,
         device="cpu",
         checkpoint_dir="checkpoints",
+        replaybuffer_dir="replaybuffer",
         save_interval=50,
     ):
         self.env = env
@@ -34,10 +36,16 @@ class Trainer:
         self.device = device
 
         self.checkpoint_dir = checkpoint_dir
+        self.replaybuffer_dir = replaybuffer_dir
         self.save_interval = save_interval
 
         os.makedirs(
             checkpoint_dir,
+            exist_ok=True,
+        )
+
+        os.makedirs(
+            replaybuffer_dir,
             exist_ok=True,
         )
 
@@ -299,6 +307,7 @@ class Trainer:
                 % self.save_interval
                 == 0
             ):
+                # Save DQN checkpoint.
                 path = os.path.join(
                     self.checkpoint_dir,
                     f"checkpoint_ep{episode}.pt",
@@ -310,6 +319,16 @@ class Trainer:
                     epsilon=epsilon,
                     scores_window=self.scores,
                     total_steps=total_steps,
+                )
+
+                # Save replay buffer separately.
+                replaybuffer_path = os.path.join(
+                    self.replaybuffer_dir,
+                    f"replay_buffer_ep{episode}.npz",
+                )
+
+                self.algorithm.replay_buffer.save(
+                    replaybuffer_path
                 )
 
             print(

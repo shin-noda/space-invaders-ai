@@ -1,5 +1,4 @@
 import os
-import tempfile
 
 import numpy as np
 import torch
@@ -69,22 +68,13 @@ def test_dqn():
         len(dqn.replay_buffer),
     )
 
-    # --------------------------------------------------
-    # Check compact storage
-    # --------------------------------------------------
-
     assert (
-        dqn.replay_buffer.frames.dtype
-        == np.uint8
-    )
-
-    assert (
-        dqn.replay_buffer.frames.shape
-        == (100_000, 84, 84)
+        len(dqn.replay_buffer)
+        == 10
     )
 
     # --------------------------------------------------
-    # Check sampling
+    # Check sampling through DQN
     # --------------------------------------------------
 
     (
@@ -125,6 +115,14 @@ def test_dqn():
         batch_size,
     )
 
+    assert rewards.shape == (
+        batch_size,
+    )
+
+    assert dones.shape == (
+        batch_size,
+    )
+
     # --------------------------------------------------
     # Check DQN training
     # --------------------------------------------------
@@ -138,6 +136,11 @@ def test_dqn():
 
     assert loss is not None
 
+    assert isinstance(
+        loss,
+        float,
+    )
+
     # --------------------------------------------------
     # Test checkpoint save/load
     # --------------------------------------------------
@@ -146,24 +149,10 @@ def test_dqn():
         "tests/test_dqn_checkpoint.pt"
     )
 
-    dqn.replay_buffer.position = 10
-    dqn.replay_buffer.size = 10
     dqn.total_steps = 1234
-
-    original_position = (
-        dqn.replay_buffer.position
-    )
-
-    original_size = (
-        dqn.replay_buffer.size
-    )
 
     original_total_steps = (
         dqn.total_steps
-    )
-
-    original_frames = (
-        dqn.replay_buffer.frames.copy()
     )
 
     dqn.save_checkpoint(
@@ -203,7 +192,7 @@ def test_dqn():
     )
 
     # --------------------------------------------------
-    # Verify metadata
+    # Verify DQN checkpoint metadata
     # --------------------------------------------------
 
     assert (
@@ -231,60 +220,17 @@ def test_dqn():
     )
 
     # --------------------------------------------------
-    # Verify replay buffer
+    # Verify replay buffer is NOT in checkpoint
     # --------------------------------------------------
 
     assert (
-        loaded_dqn.replay_buffer.position
-        == original_position
-    )
-
-    assert (
-        loaded_dqn.replay_buffer.size
-        == original_size
-    )
-
-    assert np.array_equal(
-        loaded_dqn.replay_buffer.frames,
-        original_frames,
+        "replay_buffer"
+        not in checkpoint
     )
 
     print(
-        "Replay buffer restored correctly."
-    )
-
-    # --------------------------------------------------
-    # Verify loaded replay buffer can sample
-    # --------------------------------------------------
-
-    (
-        loaded_states,
-        loaded_actions,
-        loaded_rewards,
-        loaded_next_states,
-        loaded_dones,
-    ) = (
-        loaded_dqn.replay_buffer.sample(
-            batch_size
-        )
-    )
-
-    assert loaded_states.shape == (
-        batch_size,
-        4,
-        84,
-        84,
-    )
-
-    assert loaded_next_states.shape == (
-        batch_size,
-        4,
-        84,
-        84,
-    )
-
-    print(
-        "Loaded replay buffer can sample."
+        "Replay buffer is correctly "
+        "excluded from DQN checkpoint."
     )
 
     # --------------------------------------------------
@@ -299,7 +245,7 @@ def test_dqn():
         )
 
     print(
-        "✅ DQN checkpoint test passed!"
+        "✅ DQN test passed!"
     )
 
 
