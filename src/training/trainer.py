@@ -12,7 +12,7 @@ class Trainer:
 
     The Trainer handles:
     - environment interaction
-    - episode tracking
+    - episode tracking (raw score and clipped reward)
     - step-based linear epsilon scheduling
     - replay buffer warmup
     - target network updates
@@ -81,8 +81,9 @@ class Trainer:
                 writer.writerow(
                     [
                         "episode",
-                        "reward",
-                        "average_reward",
+                        "score",
+                        "clipped_reward",
+                        "average_score",
                         "epsilon",
                         "steps",
                         "loss",
@@ -106,8 +107,9 @@ class Trainer:
 
         header = [
             "episode",
-            "reward",
-            "average_reward",
+            "score",
+            "clipped_reward",
+            "average_score",
             "epsilon",
             "steps",
             "loss",
@@ -204,10 +206,10 @@ class Trainer:
             start_episode,
             num_episodes + 1,
         ):
-            state, _ = self.env.reset()
+            state, info = self.env.reset()
 
             done = False
-            episode_reward = 0.0
+            clipped_reward = 0.0
             last_loss = None
 
             while not done:
@@ -237,7 +239,7 @@ class Trainer:
                     reward,
                     terminated,
                     truncated,
-                    _,
+                    info,
                 ) = self.env.step(action)
 
                 done = (
@@ -281,10 +283,16 @@ class Trainer:
                     self.algorithm.update_target_network()
 
                 state = next_state
-                episode_reward += reward
+                clipped_reward += reward
+
+            # Extract raw unclipped score from RecordEpisodeStatistics wrapper if present
+            if "episode" in info:
+                raw_score = float(info["episode"]["r"])
+            else:
+                raw_score = clipped_reward
 
             self.scores.append(
-                episode_reward
+                raw_score
             )
 
             average_score = np.mean(
@@ -308,7 +316,8 @@ class Trainer:
                 writer.writerow(
                     [
                         episode,
-                        episode_reward,
+                        raw_score,
+                        clipped_reward,
                         average_score,
                         epsilon,
                         total_steps,
@@ -347,8 +356,9 @@ class Trainer:
 
             print(
                 f"Episode {episode:5d} | "
-                f"Reward {episode_reward:7.2f} | "
-                f"Avg {average_score:7.2f} | "
+                f"Score {raw_score:7.1f} | "
+                f"Clipped {clipped_reward:5.1f} | "
+                f"Avg {average_score:7.1f} | "
                 f"Epsilon {epsilon:.4f} | "
                 f"Steps {total_steps:7d} | "
                 f"Loss {loss_text}"

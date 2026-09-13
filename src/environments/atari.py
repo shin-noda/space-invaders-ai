@@ -8,7 +8,7 @@ def make_atari_env(
     stack_frames=4,
 ):
     """
-    Create a single Atari environment.
+    Create a single Atari environment wrapped with episode stat tracking.
 
     Parameters
     ----------
@@ -31,6 +31,9 @@ def make_atari_env(
         f"ALE/{game}-v5",
         render_mode=render_mode,
     )
+
+    # Track raw unclipped episode score ("r") and length ("l") in info dict
+    env = gym.wrappers.RecordEpisodeStatistics(env)
 
     if stack_frames > 1:
         env = gym.wrappers.FrameStackObservation(
