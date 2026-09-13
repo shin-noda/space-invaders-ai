@@ -220,5 +220,4 @@ __marimo__/
 # Reinforcement learning experiments
 checkpoints/
 replaybuffer/
-episode_log.csv
 .DS_Store
