@@ -38,23 +38,23 @@ def test_dqn():
         batch_size=batch_size,
     )
 
-    state = np.random.rand(
-        4,
-        84,
-        84,
-    ).astype(np.float32)
-
-    next_state = np.random.rand(
-        4,
-        84,
-        84,
-    ).astype(np.float32)
-
     # --------------------------------------------------
-    # Fill replay buffer
+    # Fill replay buffer with sequential transitions
     # --------------------------------------------------
 
     for i in range(10):
+        state = np.random.rand(
+            4,
+            84,
+            84,
+        ).astype(np.float32)
+
+        next_state = np.random.rand(
+            4,
+            84,
+            84,
+        ).astype(np.float32)
+
         dqn.store(
             state,
             action=i % num_actions,
@@ -124,7 +124,7 @@ def test_dqn():
     )
 
     # --------------------------------------------------
-    # Check DQN training
+    # Check DQN training step
     # --------------------------------------------------
 
     loss = dqn.train_step()
@@ -171,7 +171,7 @@ def test_dqn():
         "Checkpoint saved."
     )
 
-    # Create a completely new DQN.
+    # Create a completely new DQN instance
     new_brain = DummyBrain()
     new_target_brain = DummyBrain()
 

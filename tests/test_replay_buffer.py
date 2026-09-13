@@ -13,17 +13,17 @@ def test_replay_buffer():
         capacity=capacity,
     )
 
-    state = np.random.rand(
-        4,
-        84,
-        84,
-    ).astype(np.float32)
-
     # --------------------------------------------------
     # Fill replay buffer
     # --------------------------------------------------
 
     for i in range(10):
+        state = np.random.rand(
+            4,
+            84,
+            84,
+        ).astype(np.float32)
+
         replay_buffer.add(
             state,
             action=i % 6,
@@ -196,6 +196,12 @@ def test_replay_buffer():
     )
 
     for i in range(10):
+        state = np.random.rand(
+            4,
+            84,
+            84,
+        ).astype(np.float32)
+
         replay_buffer.add(
             state,
             action=0,
@@ -375,7 +381,7 @@ def test_replay_buffer():
         )
 
     print(
-        "✅ ReplayBuffer test passed!" 
+        "✅ ReplayBuffer test passed!"
     )
 
 

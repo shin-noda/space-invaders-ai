@@ -22,11 +22,12 @@ GAMMA = 0.99
 REPLAY_CAPACITY = 100_000
 BATCH_SIZE = 32
 
-TARGET_UPDATE_INTERVAL = 1_000
+TARGET_UPDATE_INTERVAL = 10_000
+WARMUP_STEPS = 10_000
+EXPLORATION_STEPS = 1_000_000
 
 EPSILON_START = 1.0
-EPSILON_END = 0.01
-EPSILON_DECAY = 0.9995
+EPSILON_END = 0.1
 
 SAVE_INTERVAL = 50
 
@@ -216,9 +217,10 @@ if __name__ == "__main__":
     trainer.train_dqn(
         num_episodes=NUM_EPISODES,
         start_episode=start_episode,
-        epsilon_start=epsilon,
+        epsilon_start=EPSILON_START,
         epsilon_end=EPSILON_END,
-        epsilon_decay=EPSILON_DECAY,
+        exploration_steps=EXPLORATION_STEPS,
+        warmup_steps=WARMUP_STEPS,
         target_update_interval=(
             TARGET_UPDATE_INTERVAL
         ),

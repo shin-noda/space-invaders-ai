@@ -1,3 +1,4 @@
+from collections import deque
 import cv2
 import numpy as np
 from gymnasium import Wrapper
@@ -8,13 +9,11 @@ class AtariPreprocess(Wrapper):
     """
     Preprocess Atari image observations.
 
-    For grayscale observations, each frame has shape:
-
-        (height, width)
-
-    Frame stacking is handled separately by Gymnasium, producing:
-
-        (stack_size, height, width)
+    Handles:
+    - Frame max-pooling across consecutive steps to eliminate sprite flickering
+    - Cropping, grayscaling, and resizing to target output size
+    - Normalizing frame pixel values to [0.0, 1.0]
+    - Reward clipping via sign(reward) to prevent gradient instability
     """
 
     def __init__(
@@ -29,6 +28,9 @@ class AtariPreprocess(Wrapper):
         self.crop = crop
         self.output_size = output_size
         self.grayscale = grayscale
+
+        # Buffer to keep track of the last 2 raw frames for max-pooling
+        self._frame_buffer = deque(maxlen=2)
 
         if grayscale:
             shape = (
@@ -83,11 +85,8 @@ class AtariPreprocess(Wrapper):
             np.float32
         ) / 255.0
 
-        # For grayscale:
-        # keep shape as (84, 84).
-        #
-        # For RGB:
-        # convert (H, W, C) -> (C, H, W).
+        # For grayscale: keep shape as (84, 84).
+        # For RGB: convert (H, W, C) -> (C, H, W).
         if not self.grayscale:
             frame = np.transpose(
                 frame,
@@ -100,6 +99,9 @@ class AtariPreprocess(Wrapper):
         obs, info = self.env.reset(
             **kwargs
         )
+
+        self._frame_buffer.clear()
+        self._frame_buffer.append(obs)
 
         return (
             self._preprocess(obs),
@@ -115,9 +117,23 @@ class AtariPreprocess(Wrapper):
             info,
         ) = self.env.step(action)
 
+        self._frame_buffer.append(obs)
+
+        # Max-pool across last two frames to eliminate Atari sprite flicker
+        if len(self._frame_buffer) == 2:
+            max_frame = np.maximum(
+                self._frame_buffer[0],
+                self._frame_buffer[1],
+            )
+        else:
+            max_frame = obs
+
+        # Clip reward to [-1, 1]
+        clipped_reward = np.sign(reward)
+
         return (
-            self._preprocess(obs),
-            reward,
+            self._preprocess(max_frame),
+            clipped_reward,
             terminated,
             truncated,
             info,
@@ -132,7 +148,7 @@ def make_preprocessed_atari_env(
     stack_frames=4,
 ):
     """
-    Apply Atari preprocessing and optional frame stacking.
+    Apply Atari preprocessing and frame stacking.
     """
 
     env = AtariPreprocess(

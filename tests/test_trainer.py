@@ -1,3 +1,6 @@
+import os
+import shutil
+
 import numpy as np
 
 from src.environments.atari import make_atari_env
@@ -11,6 +14,7 @@ from src.training.trainer import Trainer
 
 def test_trainer():
     device = "cpu"
+    checkpoint_dir = "checkpoints/test"
 
     # Environment
     env = make_atari_env(
@@ -52,18 +56,19 @@ def test_trainer():
         env=env,
         algorithm=dqn,
         device=device,
-        checkpoint_dir="checkpoints/test",
-        replaybuffer_dir="replaybuffer/test",
+        checkpoint_dir=checkpoint_dir,
         save_interval=10,
     )
 
-    # Run only one episode.
+    # Run only one episode with step-based linear epsilon scheduling
     scores = trainer.train_dqn(
         num_episodes=1,
+        start_episode=1,
         epsilon_start=1.0,
-        epsilon_end=1.0,
-        epsilon_decay=1.0,
-        target_update_interval=100,
+        epsilon_end=0.1,
+        exploration_steps=100,
+        warmup_steps=10,
+        target_update_interval=50,
     )
 
     print()
@@ -73,6 +78,10 @@ def test_trainer():
     assert np.isfinite(scores[0])
 
     env.close()
+
+    # Cleanup test checkpoint directory
+    if os.path.exists(checkpoint_dir):
+        shutil.rmtree(checkpoint_dir)
 
     print("✅ Trainer test passed!")
 

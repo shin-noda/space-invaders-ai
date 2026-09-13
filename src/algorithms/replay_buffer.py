@@ -140,40 +140,47 @@ class ReplayBuffer:
     ):
         """
         Check whether enough history exists to reconstruct
-        a state without crossing an episode boundary.
+        a state without crossing an episode boundary or ring-buffer boundaries.
         """
 
         if self.size < 5:
             return False
 
-        if index < 3:
-            return False
-
-        if self.size < self.capacity:
-            if index >= self.size - 1:
+        # Avoid boundary collision near write position when buffer is full
+        if self.size == self.capacity:
+            if index == (self.position - 1) % self.capacity:
+                return False
+            if index == self.position:
                 return False
 
-        for i in range(
-            index - 3,
-            index,
-        ):
-            if self.dones[
-                i % self.capacity
-            ]:
+        # Ensure index has at least 3 historical frames behind it in a non-full buffer
+        if self.size < self.capacity and index < 3:
+            return False
+
+        # Check if any episode terminal state occurred in the state history
+        for offset in range(1, 4):
+            prev_idx = (index - offset) % self.capacity
+            if self.dones[prev_idx]:
                 return False
 
         return True
 
     def _sample_index(self):
         """
-        Find a valid transition index.
+        Find a valid transition index across active buffer memory.
         """
 
-        for _ in range(1000):
-            index = random.randrange(
-                3,
-                self.size - 1,
-            )
+        for _ in range(10_000):
+            if self.size < self.capacity:
+                index = random.randrange(
+                    3,
+                    self.size - 1,
+                )
+            else:
+                index = random.randrange(
+                    0,
+                    self.capacity,
+                )
 
             if self._valid_index(index):
                 return index

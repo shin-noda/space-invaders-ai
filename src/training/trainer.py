@@ -13,7 +13,8 @@ class Trainer:
     The Trainer handles:
     - environment interaction
     - episode tracking
-    - epsilon scheduling
+    - step-based linear epsilon scheduling
+    - replay buffer warmup
     - target network updates
     - checkpoint saving
     - replay buffer saving
@@ -178,15 +179,14 @@ class Trainer:
         num_episodes,
         epsilon_start=1.0,
         epsilon_end=0.1,
-        epsilon_decay=0.995,
-        target_update_interval=1000,
+        exploration_steps=1_000_000,
+        warmup_steps=10_000,
+        target_update_interval=10_000,
         start_episode=1,
     ):
         """
-        Train using DQN.
-
-        The DQN algorithm owns the persistent
-        total training step counter.
+        Train using DQN with frame-step based linear epsilon decay
+        and replay buffer warmup.
         """
 
         # Make sure the CSV matches the checkpoint
@@ -195,10 +195,7 @@ class Trainer:
             start_episode
         )
 
-        epsilon = epsilon_start
-
         # Restore the DQN's existing step count.
-        # If this is a fresh run, it will be 0.
         total_steps = (
             self.algorithm.total_steps
         )
@@ -211,8 +208,22 @@ class Trainer:
 
             done = False
             episode_reward = 0.0
+            last_loss = None
 
             while not done:
+                # Per-step linear epsilon decay
+                epsilon = max(
+                    epsilon_end,
+                    epsilon_start
+                    - (
+                        total_steps
+                        / exploration_steps
+                    )
+                    * (
+                        epsilon_start
+                        - epsilon_end
+                    ),
+                )
 
                 action = (
                     self.algorithm.select_action(
@@ -242,14 +253,22 @@ class Trainer:
                     done,
                 )
 
-                loss = (
-                    self.algorithm.train_step()
-                )
+                # Only trigger gradient updates after warmup
+                if (
+                    len(
+                        self.algorithm.replay_buffer
+                    )
+                    >= warmup_steps
+                ):
+                    loss = (
+                        self.algorithm.train_step()
+                    )
+                    if loss is not None:
+                        last_loss = loss
 
                 total_steps += 1
 
-                # Keep the algorithm's persistent
-                # step counter synchronized.
+                # Keep the algorithm's persistent step counter synchronized.
                 self.algorithm.total_steps = (
                     total_steps
                 )
@@ -268,19 +287,14 @@ class Trainer:
                 episode_reward
             )
 
-            epsilon = max(
-                epsilon_end,
-                epsilon * epsilon_decay,
-            )
-
             average_score = np.mean(
                 self.scores
             )
 
             loss_text = (
                 "N/A"
-                if loss is None
-                else f"{loss:.4f}"
+                if last_loss is None
+                else f"{last_loss:.4f}"
             )
 
             # Record this episode in the CSV.
