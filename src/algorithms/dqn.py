@@ -19,6 +19,7 @@ class DQN:
     - target network updates
     - optimizer updates
     - checkpoint saving/loading
+    - replay buffer saving/loading
     """
 
     def __init__(
@@ -187,6 +188,24 @@ class DQN:
         )
 
         self.target_brain.eval()
+
+    def save_replay_buffer(
+        self,
+        path,
+    ):
+        """
+        Save the replay buffer to a separate file.
+        """
+        self.replay_buffer.save(path)
+
+    def load_replay_buffer(
+        self,
+        path,
+    ):
+        """
+        Load the replay buffer from a separate file.
+        """
+        self.replay_buffer.load(path)
 
     def save_checkpoint(
         self,

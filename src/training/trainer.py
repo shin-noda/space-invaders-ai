@@ -3,7 +3,6 @@ import os
 from collections import deque
 
 import numpy as np
-import torch
 
 
 class Trainer:
@@ -12,41 +11,49 @@ class Trainer:
 
     The Trainer handles:
     - environment interaction
-    - episode tracking (raw score and clipped reward)
-    - step-based linear epsilon scheduling
+    - episode tracking
+    - raw score tracking
+    - clipped reward tracking
+    - episode-based epsilon scheduling
     - replay buffer warmup
     - target network updates
     - checkpoint saving
     - replay buffer saving
     - episode CSV logging
-
-    The actual learning logic belongs to the algorithm.
     """
 
     def __init__(
         self,
         env,
         algorithm,
-        device="cpu",
+        device,
         checkpoint_dir="checkpoints",
-        replaybuffer_dir="replaybuffer",
         save_interval=50,
     ):
         self.env = env
         self.algorithm = algorithm
         self.device = device
 
-        self.checkpoint_dir = checkpoint_dir
-        self.replaybuffer_dir = replaybuffer_dir
-        self.save_interval = save_interval
+        self.checkpoint_dir = (
+            checkpoint_dir
+        )
+
+        self.replaybuffer_dir = os.path.join(
+            checkpoint_dir,
+            "replay_buffers",
+        )
+
+        self.save_interval = (
+            save_interval
+        )
 
         os.makedirs(
-            checkpoint_dir,
+            self.checkpoint_dir,
             exist_ok=True,
         )
 
         os.makedirs(
-            replaybuffer_dir,
+            self.replaybuffer_dir,
             exist_ok=True,
         )
 
@@ -54,58 +61,19 @@ class Trainer:
             maxlen=100
         )
 
-        # Episode log CSV
         self.csv_path = os.path.join(
-            checkpoint_dir,
+            self.checkpoint_dir,
             "episode_log.csv",
         )
 
         self._create_csv_if_missing()
 
-    def _create_csv_if_missing(self):
-        """
-        Create the episode CSV with its header
-        if it does not already exist.
-        """
+    # --------------------------------------------------
+    # CSV
+    # --------------------------------------------------
 
-        if not os.path.exists(
-            self.csv_path
-        ):
-            with open(
-                self.csv_path,
-                "w",
-                newline="",
-            ) as file:
-                writer = csv.writer(file)
-
-                writer.writerow(
-                    [
-                        "episode",
-                        "score",
-                        "clipped_reward",
-                        "average_score",
-                        "epsilon",
-                        "steps",
-                        "loss",
-                    ]
-                )
-
-    def _prepare_csv(
-        self,
-        start_episode,
-    ):
-        """
-        Make the CSV match the checkpoint we are
-        resuming from.
-
-        If resuming from episode 50, only episodes
-        1-50 are kept. Any rows after episode 50
-        are discarded.
-
-        If starting from episode 1, the CSV is reset.
-        """
-
-        header = [
+    def _csv_header(self):
+        return [
             "episode",
             "score",
             "clipped_reward",
@@ -115,90 +83,193 @@ class Trainer:
             "loss",
         ]
 
-        # Fresh training run.
-        if start_episode == 1:
-            with open(
-                self.csv_path,
-                "w",
-                newline="",
-            ) as file:
-                writer = csv.writer(file)
-                writer.writerow(header)
-
-            return
-
-        # Nothing to truncate if the CSV does not exist.
-        if not os.path.exists(
+    def _create_csv_if_missing(self):
+        if os.path.exists(
             self.csv_path
         ):
-            with open(
-                self.csv_path,
-                "w",
-                newline="",
-            ) as file:
-                writer = csv.writer(file)
-                writer.writerow(header)
-
             return
 
-        # Read the existing CSV.
-        with open(
-            self.csv_path,
-            "r",
-            newline="",
-        ) as file:
-            reader = csv.reader(file)
-
-            rows = list(reader)
-
-        # Keep the header plus episodes before
-        # the new training run.
-        kept_rows = [header]
-
-        for row in rows[1:]:
-            if not row:
-                continue
-
-            try:
-                episode = int(row[0])
-            except ValueError:
-                continue
-
-            if episode < start_episode:
-                kept_rows.append(row)
-
-        # Rewrite the CSV with only valid history.
         with open(
             self.csv_path,
             "w",
             newline="",
-        ) as file:
-            writer = csv.writer(file)
-            writer.writerows(kept_rows)
+        ) as f:
+
+            writer = csv.writer(f)
+
+            writer.writerow(
+                self._csv_header()
+            )
+
+    def _prepare_csv(
+        self,
+        start_episode,
+    ):
+        """
+        When resuming training, preserve all
+        CSV rows before start_episode.
+
+        The resumed episode will be written again.
+        """
+
+        if start_episode == 1:
+
+            with open(
+                self.csv_path,
+                "w",
+                newline="",
+            ) as f:
+
+                writer = csv.writer(f)
+
+                writer.writerow(
+                    self._csv_header()
+                )
+
+            return
+
+        if not os.path.exists(
+            self.csv_path
+        ):
+            self._create_csv_if_missing()
+            return
+
+        with open(
+            self.csv_path,
+            "r",
+            newline="",
+        ) as f:
+
+            rows = list(
+                csv.reader(f)
+            )
+
+        if not rows:
+            self._create_csv_if_missing()
+            return
+
+        header = rows[0]
+
+        preserved_rows = [
+            row
+            for row in rows[1:]
+            if row
+            and int(row[0]) < start_episode
+        ]
+
+        with open(
+            self.csv_path,
+            "w",
+            newline="",
+        ) as f:
+
+            writer = csv.writer(f)
+
+            writer.writerow(header)
+
+            writer.writerows(
+                preserved_rows
+            )
+
+    # --------------------------------------------------
+    # Score window
+    # --------------------------------------------------
+
+    def _restore_scores(
+        self,
+        scores_window,
+    ):
+        self.scores.clear()
+
+        if scores_window is None:
+            return
+
+        for score in scores_window:
+            self.scores.append(
+                float(score)
+            )
+
+    # --------------------------------------------------
+    # Epsilon
+    # --------------------------------------------------
+
+    def _calculate_epsilon(
+        self,
+        episode,
+        epsilon_start,
+        epsilon_end,
+        exploration_episodes,
+    ):
+        """
+        Linearly decay epsilon based on episode number.
+
+        Example:
+
+            episode 1
+                -> epsilon_start
+
+            episode exploration_episodes
+                -> epsilon_end
+
+            episodes after that
+                -> epsilon_end
+        """
+
+        if exploration_episodes <= 0:
+            return float(epsilon_end)
+
+        progress = (
+            (episode - 1)
+            / exploration_episodes
+        )
+
+        progress = min(
+            max(progress, 0.0),
+            1.0,
+        )
+
+        epsilon = (
+            epsilon_start
+            - progress
+            * (
+                epsilon_start
+                - epsilon_end
+            )
+        )
+
+        return max(
+            epsilon_end,
+            epsilon,
+        )
+
+    # --------------------------------------------------
+    # Training
+    # --------------------------------------------------
 
     def train_dqn(
         self,
         num_episodes,
         epsilon_start=1.0,
         epsilon_end=0.1,
-        exploration_steps=1_000_000,
+        exploration_episodes=9_500,
         warmup_steps=10_000,
         target_update_interval=10_000,
         start_episode=1,
     ):
         """
-        Train using DQN with frame-step based linear epsilon decay
-        and replay buffer warmup.
+        Train DQN for the requested number of episodes.
+
+        Epsilon decay is episode-based.
+
+        The target network and replay warmup remain
+        step-based.
         """
 
-        # Make sure the CSV matches the checkpoint
-        # we are starting from.
         self._prepare_csv(
             start_episode
         )
 
-        # Restore the DQN's existing step count.
-        total_steps = (
+        total_steps = int(
             self.algorithm.total_steps
         )
 
@@ -206,31 +277,41 @@ class Trainer:
             start_episode,
             num_episodes + 1,
         ):
-            state, info = self.env.reset()
+
+            state, info = (
+                self.env.reset()
+            )
 
             done = False
+
             clipped_reward = 0.0
             last_loss = None
 
-            while not done:
-                # Per-step linear epsilon decay
-                epsilon = max(
-                    epsilon_end,
-                    epsilon_start
-                    - (
-                        total_steps
-                        / exploration_steps
-                    )
-                    * (
-                        epsilon_start
-                        - epsilon_end
+            # ------------------------------------------
+            # Episode-based epsilon
+            # ------------------------------------------
+
+            epsilon = (
+                self._calculate_epsilon(
+                    episode=episode,
+                    epsilon_start=epsilon_start,
+                    epsilon_end=epsilon_end,
+                    exploration_episodes=(
+                        exploration_episodes
                     ),
                 )
+            )
+
+            # ------------------------------------------
+            # Environment interaction
+            # ------------------------------------------
+
+            while not done:
 
                 action = (
                     self.algorithm.select_action(
                         state,
-                        epsilon=epsilon,
+                        epsilon,
                     )
                 )
 
@@ -240,7 +321,9 @@ class Trainer:
                     terminated,
                     truncated,
                     info,
-                ) = self.env.step(action)
+                ) = self.env.step(
+                    action
+                )
 
                 done = (
                     terminated
@@ -255,113 +338,169 @@ class Trainer:
                     done,
                 )
 
-                # Only trigger gradient updates after warmup
+                # --------------------------------------
+                # Training after replay warmup
+                # --------------------------------------
+
                 if (
                     len(
                         self.algorithm.replay_buffer
                     )
                     >= warmup_steps
                 ):
+
                     loss = (
                         self.algorithm.train_step()
                     )
+
                     if loss is not None:
                         last_loss = loss
 
+                # --------------------------------------
+                # Step tracking
+                # --------------------------------------
+
                 total_steps += 1
 
-                # Keep the algorithm's persistent step counter synchronized.
                 self.algorithm.total_steps = (
                     total_steps
                 )
 
+                # --------------------------------------
+                # Target network update
+                # --------------------------------------
+
                 if (
-                    total_steps
+                    target_update_interval > 0
+                    and total_steps
                     % target_update_interval
                     == 0
                 ):
+
                     self.algorithm.update_target_network()
 
                 state = next_state
+
                 clipped_reward += reward
 
-            # Extract raw unclipped score from RecordEpisodeStatistics wrapper if present
-            if "episode" in info:
-                raw_score = float(info["episode"]["r"])
+            # ------------------------------------------
+            # Episode score
+            # ------------------------------------------
+
+            if (
+                "episode" in info
+                and info["episode"] is not None
+                and "r" in info["episode"]
+            ):
+
+                score = float(
+                    info["episode"]["r"]
+                )
+
             else:
-                raw_score = clipped_reward
+
+                score = float(
+                    clipped_reward
+                )
 
             self.scores.append(
-                raw_score
+                score
             )
 
-            average_score = np.mean(
-                self.scores
+            average_score = float(
+                np.mean(
+                    self.scores
+                )
             )
 
-            loss_text = (
-                "N/A"
-                if last_loss is None
-                else f"{last_loss:.4f}"
-            )
+            # ------------------------------------------
+            # Loss formatting
+            # ------------------------------------------
 
-            # Record this episode in the CSV.
+            if last_loss is None:
+                loss_text = "N/A"
+            else:
+                loss_text = (
+                    f"{float(last_loss):.4f}"
+                )
+
+            # ------------------------------------------
+            # CSV
+            # ------------------------------------------
+
             with open(
                 self.csv_path,
                 "a",
                 newline="",
-            ) as file:
-                writer = csv.writer(file)
+            ) as f:
+
+                writer = csv.writer(f)
 
                 writer.writerow(
                     [
                         episode,
-                        raw_score,
-                        clipped_reward,
-                        average_score,
-                        epsilon,
+                        f"{score:.1f}",
+                        f"{clipped_reward:.1f}",
+                        f"{average_score:.1f}",
+                        f"{epsilon:.4f}",
                         total_steps,
-                        loss_text,
+                        (
+                            "N/A"
+                            if last_loss is None
+                            else f"{float(last_loss):.6f}"
+                        ),
                     ]
                 )
 
+            # ------------------------------------------
+            # Checkpoint
+            # ------------------------------------------
+
             if (
-                episode
+                self.save_interval > 0
+                and episode
                 % self.save_interval
                 == 0
             ):
-                # Save DQN checkpoint.
-                path = os.path.join(
+
+                checkpoint_path = os.path.join(
                     self.checkpoint_dir,
                     f"checkpoint_ep{episode}.pt",
                 )
 
                 self.algorithm.save_checkpoint(
-                    path=path,
+                    path=checkpoint_path,
                     episode=episode,
                     epsilon=epsilon,
-                    scores_window=self.scores,
+                    scores_window=list(
+                        self.scores
+                    ),
                     total_steps=total_steps,
                 )
 
-                # Save replay buffer separately.
-                replaybuffer_path = os.path.join(
+                replay_path = os.path.join(
                     self.replaybuffer_dir,
-                    f"replay_buffer_ep{episode}.npz",
+                    f"replay_ep{episode}.npz",
                 )
 
-                self.algorithm.replay_buffer.save(
-                    replaybuffer_path
+                self.algorithm.save_replay_buffer(
+                    replay_path
                 )
+
+            # ------------------------------------------
+            # Console output
+            # ------------------------------------------
 
             print(
                 f"Episode {episode:5d} | "
-                f"Score {raw_score:7.1f} | "
+                f"Score {score:7.1f} | "
                 f"Clipped {clipped_reward:5.1f} | "
                 f"Avg {average_score:7.1f} | "
                 f"Epsilon {epsilon:.4f} | "
-                f"Steps {total_steps:7d} | "
+                f"Steps {total_steps:8d} | "
                 f"Loss {loss_text}"
             )
 
-        return list(self.scores)
+        return list(
+            self.scores
+        )

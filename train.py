@@ -24,7 +24,10 @@ BATCH_SIZE = 32
 
 TARGET_UPDATE_INTERVAL = 10_000
 WARMUP_STEPS = 10_000
-EXPLORATION_STEPS = 1_000_000
+
+# Epsilon decays based on episodes.
+# It reaches EPSILON_END around episode 9,500.
+EXPLORATION_EPISODES = 9_500
 
 EPSILON_START = 1.0
 EPSILON_END = 0.1
@@ -32,6 +35,10 @@ EPSILON_END = 0.1
 SAVE_INTERVAL = 50
 
 CHECKPOINT_DIR = "checkpoints"
+REPLAYBUFFER_DIR = os.path.join(
+    CHECKPOINT_DIR,
+    "replay_buffers",
+)
 
 
 DEVICE = (
@@ -75,6 +82,23 @@ def find_latest_checkpoint(
         checkpoints,
         key=episode_number,
     )
+
+
+def find_replay_buffer(
+    replaybuffer_dir,
+    episode,
+):
+    replay_path = os.path.join(
+        replaybuffer_dir,
+        f"replay_ep{episode}.npz",
+    )
+
+    if os.path.exists(
+        replay_path
+    ):
+        return replay_path
+
+    return None
 
 
 env = make_atari_env(
@@ -138,6 +162,11 @@ if __name__ == "__main__":
     print(f"Game:     {GAME}")
     print(f"Device:   {DEVICE}")
     print(f"Episodes: {NUM_EPISODES}")
+    print(
+        f"Epsilon:  {EPSILON_START:.1f}"
+        f" -> {EPSILON_END:.1f}"
+        f" over {EXPLORATION_EPISODES:,} episodes"
+    )
     print("========================================")
     print()
 
@@ -154,7 +183,6 @@ if __name__ == "__main__":
         )
 
         start_episode = 1
-        epsilon = EPSILON_START
 
     else:
 
@@ -173,17 +201,36 @@ if __name__ == "__main__":
             "episode"
         ]
 
-        epsilon = checkpoint[
-            "epsilon"
-        ]
+        total_steps = int(
+            checkpoint.get(
+                "total_steps",
+                0,
+            )
+        )
 
-        total_steps = checkpoint.get(
-            "total_steps",
-            0,
+        # Continue from the checkpoint's
+        # environment step count.
+        algorithm.total_steps = (
+            total_steps
         )
 
         start_episode = (
             last_episode + 1
+        )
+
+        # Restore the rolling score window.
+        scores_window = checkpoint.get(
+            "scores_window",
+            [],
+        )
+
+        trainer._restore_scores(
+            scores_window
+        )
+
+        epsilon = checkpoint.get(
+            "epsilon",
+            EPSILON_START,
         )
 
         print(
@@ -197,7 +244,7 @@ if __name__ == "__main__":
         )
 
         print(
-            f"Epsilon:         "
+            f"Saved epsilon:   "
             f"{epsilon:.4f}"
         )
 
@@ -206,10 +253,43 @@ if __name__ == "__main__":
             f"{total_steps:,}"
         )
 
+        # Load the replay buffer that belongs
+        # to the same checkpoint.
+        replay_path = (
+            find_replay_buffer(
+                REPLAYBUFFER_DIR,
+                last_episode,
+            )
+        )
+
+        if replay_path is None:
+
+            print(
+                "WARNING: Replay buffer "
+                f"for episode {last_episode} "
+                "was not found."
+            )
+
+            print(
+                "Starting with an empty "
+                "replay buffer."
+            )
+
+        else:
+
+            algorithm.load_replay_buffer(
+                replay_path
+            )
+
+            print(
+                f"Replay buffer:   "
+                f"{len(algorithm.replay_buffer):,}"
+                f" transitions"
+            )
+
         print(
-            f"Replay buffer:   "
-            f"{len(algorithm.replay_buffer):,}"
-            f" transitions"
+            f"Score window:    "
+            f"{len(trainer.scores)} episodes"
         )
 
     print()
@@ -219,7 +299,7 @@ if __name__ == "__main__":
         start_episode=start_episode,
         epsilon_start=EPSILON_START,
         epsilon_end=EPSILON_END,
-        exploration_steps=EXPLORATION_STEPS,
+        exploration_episodes=EXPLORATION_EPISODES,
         warmup_steps=WARMUP_STEPS,
         target_update_interval=(
             TARGET_UPDATE_INTERVAL
